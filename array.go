@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 	"strconv"
+	"strings"
 )
 
 var ErrNotAStructPtr = errors.New("must spec a struct ptr to parse into")
@@ -81,6 +82,10 @@ func Parse(data []string, v interface{}) error {
 	return doParse(data, ref)
 }
 
+// doParse will parse the string array into ref (struct ptr) by tag like `array:"[1]"`.
+//
+// The array tag works like array element deref, e.g. `array:"[1]"` means array[1].
+// Furthermore, add `omit` to allow to ignore absent items.
 func doParse(data []string, ref reflect.Value) error {
 	refType := ref.Type()
 
@@ -97,31 +102,67 @@ func doParse(data []string, ref reflect.Value) error {
 		case reflect.Ptr, reflect.Struct:
 			return ErrUnsupportField
 		default:
-			value, exist := tag.Lookup("array")
-			// fmt.Println(value, exist)
+			tagContent, exist := tag.Lookup("array")
+			// fmt.Println(config, exist)
 
 			if exist {
-				value = value[1 : len(value)-1]
-				index, err := strconv.Atoi(value)
+				index, options := parseOptions(tagContent)
+				if index < 0 || index >= len(data) {
+					if options&OptOmitEmpty == OptOmitEmpty {
+						continue
+					} else {
+						return ErrIndex
+					}
+				}
+
+				// fmt.Println(data[index])
+				parser, ok := defaultBuiltInParsers[typee.Kind()]
+				if !ok {
+					return ErrUnsupportField
+				}
+				value, err := parser(data[index])
 				if err != nil {
-					return ErrIndex
+					return err
 				}
-				if 0 <= index && index < len(data) {
-					// fmt.Println(data[index])
-					parser, ok := defaultBuiltInParsers[typee.Kind()]
-					if !ok {
-						return ErrUnsupportField
-					}
-					value, err := parser(data[index])
-					if err != nil {
-						return err
-					}
-					field.Set(reflect.ValueOf(value).Convert(typee))
-				}
+				field.Set(reflect.ValueOf(value).Convert(typee))
 			}
 			break
 		}
 	}
 
 	return nil
+}
+
+const (
+	OptOmitEmpty int = 1 << iota
+	OptUnknown
+)
+
+func parseOptions(value string) (index int, options int) {
+	items := strings.Split(value, ",")
+	if len(items) <= 0 {
+		index = -1
+		return
+	}
+	for _, it := range items {
+		it := strings.TrimSpace(it)
+		switch it {
+		case "omitempty":
+			options = options | OptOmitEmpty
+		default:
+			continue
+		}
+	}
+	// first item must be like `[123]`
+	indexStr := strings.TrimFunc(items[0], func(r rune) bool {
+		if strings.ContainsRune("[] ", r) {
+			return true
+		}
+		return false
+	})
+	index, err := strconv.Atoi(indexStr)
+	if err != nil {
+		index = -1
+	}
+	return
 }
