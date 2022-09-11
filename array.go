@@ -6,7 +6,10 @@ import (
 	"strconv"
 )
 
-var ErrNotAStructPtr = errors.New("")
+var ErrNotAStructPtr = errors.New("must spec a struct ptr to parse into")
+var ErrUnsupportField = errors.New("can not parse unsupport field type (e.g. struct, ptr, ...)")
+var ErrParse = errors.New("value parse error")
+var ErrIndex = errors.New("array index invalid")
 
 type ParserFunc func(v string) (interface{}, error)
 
@@ -92,7 +95,7 @@ func doParse(data []string, ref reflect.Value) error {
 		typee := field.Type()
 		switch typee.Kind() {
 		case reflect.Ptr, reflect.Struct:
-			return ErrNotAStructPtr
+			return ErrUnsupportField
 		default:
 			value, exist := tag.Lookup("array")
 			// fmt.Println(value, exist)
@@ -101,13 +104,13 @@ func doParse(data []string, ref reflect.Value) error {
 				value = value[1 : len(value)-1]
 				index, err := strconv.Atoi(value)
 				if err != nil {
-					return err
+					return ErrIndex
 				}
 				if 0 <= index && index < len(data) {
 					// fmt.Println(data[index])
 					parser, ok := defaultBuiltInParsers[typee.Kind()]
 					if !ok {
-						return ErrNotAStructPtr
+						return ErrUnsupportField
 					}
 					value, err := parser(data[index])
 					if err != nil {
